@@ -108,7 +108,7 @@ module CHIP #(
     reg  [31:0] imm_w;
     reg  [31:0] mem_addr_D_w, mem_wdata_D_w;
     reg         mem_wen_D_w;
-
+    reg         mem_cen_D_w;
     reg         mulDiv_vld_w;
     wire        mulDiv_rdy_w;
     reg  [2:0]  mulDiv_mode_w;
@@ -151,6 +151,7 @@ module CHIP #(
     assign o_DMEM_addr = mem_addr_D_w;
     assign o_DMEM_wdata = mem_wdata_D_w;
     assign o_DMEM_wen = mem_wen_D_w;
+    assign o_DMEM_cen = mem_cen_D_w;
     // Todo: any combinational/sequential circuit
     always @(*) begin
         inst_w = i_IMEM_data;
@@ -166,6 +167,7 @@ module CHIP #(
         mem_addr_D_w = 0;
         mem_wdata_D_w = 0;
         mem_wen_D_w = 0;
+        mem_cen_D_w = 0;
         regWrite = 0;
         finish = 0;
         mulDiv_vld_w = 0;
@@ -246,6 +248,7 @@ module CHIP #(
             
             LW: begin
                 regWrite = 1'b1;
+                mem_cen_D_w = 1'b1;
                 finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 mem_addr_D_w = $signed({1'b0, rs1_data}) + $signed(imm_w[11:0]);
@@ -254,6 +257,7 @@ module CHIP #(
             
             SW: begin
                 finish = 1'b0;
+                mem_cen_D_w = 1'b1;
                 mem_wen_D_w = 1'b1;
                 imm_w[4:0] = inst_w[11:7];
                 imm_w[11:5] = inst_w[31:25];
