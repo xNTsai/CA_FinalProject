@@ -1,8 +1,8 @@
 //----------------------------- DO NOT MODIFY THE I/O INTERFACE!! ------------------------------//
 module CHIP #( 
     parameter BIT_W = 32                                                                                    //
-    parameter BIT_W = 32                                                                        //
-)(                                                                                              //
+                                                                          //
+)(                                                                               //
     // clock                                                                                    //
         input               i_clk,                                                              //
         input               i_rst_n,                                                            //
@@ -60,7 +60,7 @@ module CHIP #(
     localparam ADDI_FUNC3 = 3'b000;
     localparam SLTI_FUNC3 = 3'b010;
     localparam MUL_FUNC3  = 3'b000;
-    localparam AND_FUCN3 = 3'b111;
+    localparam AND_FUNC3 = 3'b111;
     localparam BEQ_FUNC3 = 3'b000;
     localparam BNE_FUNC3 = 3'b001;
     localparam BGE_FUNC3 = 3'b101;
@@ -89,6 +89,7 @@ module CHIP #(
         wire [BIT_W-1:0] mem_addr, mem_wdata, mem_rdata;
         wire mem_stall;
         reg regWrite;
+        reg finish;
         reg    [ 4:0] rs1, rs2, rd;              //
         wire   [31:0] rs1_data    ;              //
         wire   [31:0] rs2_data    ;              //
@@ -132,9 +133,9 @@ module CHIP #(
         .rdata2 (rs2_data)
     );
     // i_clk, i_rst_n, i_valid, i_A, i_B, i_inst, o_data, o_done
-    mulDiv mulDiv0(
-        .clk(i_clk),
-        .rst_n(i_rst_n),
+    MULDIV_unit mulDiv0(
+        .i_clk(i_clk),
+        .i_rst_n(i_rst_n),
         .i_valid(mulDiv_vld_w),
         .i_inst(mulDiv_mode_w),
         .i_A(mulDiv_in_A_w),
@@ -166,6 +167,7 @@ module CHIP #(
         mem_wdata_D_w = 0;
         mem_wen_D_w = 0;
         regWrite = 0;
+        finish = 0;
         mulDiv_vld_w = 0;
         mulDiv_in_A_w = rs1_data;
         mulDiv_in_B_w = rs2_data;
@@ -173,6 +175,7 @@ module CHIP #(
         case (op_code_w)
             7'b0110011: begin
                 regWrite = 1'b1;
+                finish = 1'b0;
                 case ({funct7_w, funct3_w})
                     {ADD_FUNC7, ADD_FUNC3}: begin
                         rd_data = $signed(rs1_data) + $signed(rs2_data);
@@ -204,6 +207,7 @@ module CHIP #(
             end
             7'b0010011: begin
                 regWrite = 1'b1;
+                finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 case (funct3_w)
                     ADDI_FUNC3: begin
@@ -217,6 +221,7 @@ module CHIP #(
             end
             7'b1100011:begin
                 imm_w[12:0] = {inst_w[31], inst_w[7], inst_w[30:25], inst_w[11:8], 1'b0};
+                finish = 1'b0;
                 case (funct3_w)
                     BEQ_FUNC3: begin
                         if(rs1_data == rs2_data) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
@@ -241,12 +246,14 @@ module CHIP #(
             
             LW: begin
                 regWrite = 1'b1;
+                finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 mem_addr_D_w = $signed({1'b0, rs1_data}) + $signed(imm_w[11:0]);
-                rd_data = mem_rdata_D;
+                rd_data = i_DMEM_rdata;
             end
             
             SW: begin
+                finish = 1'b0;
                 mem_wen_D_w = 1'b1;
                 imm_w[4:0] = inst_w[11:7];
                 imm_w[11:5] = inst_w[31:25];
@@ -254,24 +261,27 @@ module CHIP #(
                 mem_wdata_D_w = rs2_data;
             end
             AUIPC: begin
+                finish = 1'b0;
                 regWrite = 1'b1;
                 imm_w[31:12] = inst_w[31:12];
                 rd_data = PC + imm_w;
             end
             JAL: begin
+                finish = 1'b0;
                 imm_w[20:0] = {inst_w[31], inst_w[19:12], inst_w[20], inst_w[30:21], 1'b0};
                 next_PC = $signed({1'b0, PC}) + $signed(imm_w[20:0]);
                 regWrite = 1'b1;
                 rd_data = PC + 3'd4;
             end
             JALR: begin
+                finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 next_PC = $signed({1'b0, rs1_data}) + $signed(imm_w[11:0]);
                 regWrite = 1'b1;
                 rd_data = PC + 3'd4;
             end
             ECALL: begin
-
+                finish = 1'b1;
             end
         endcase
     end
@@ -295,6 +305,7 @@ module CHIP #(
         endcase
     end
     // sequential 
+    assign o_finish = finish;
     always @(posedge i_clk or negedge i_rst_n) begin
         if (!i_rst_n) begin
             PC <= 32'h00010000; // Do not modify this value!!!
@@ -351,17 +362,20 @@ module Reg_file(i_clk, i_rst_n, wen, rs1, rs2, rd, wdata, rdata1, rdata2);
     end
 endmodule
 
-module MULDIV_unit(i_clk, i_rst_n, i_valid, i_A, i_B, i_inst, o_data, o_done);
+module MULDIV_unit#(
+        parameter BIT_W = 32,
+        parameter DATA_W = 32
+    )(i_clk, i_rst_n, i_valid, i_A, i_B, i_inst, o_data, o_done);
     // TODO: port declaration
-    input                       i_clk,   // clock
-    input                       i_rst_n, // reset
-    input                       i_valid, //input valid signal
-    input [BIT_W - 1 : 0]      i_A,     // input operand A
-    input [BIT_W - 1 : 0]      i_B,     // input operand B
-    input [         2 : 0]      i_inst,  // instruction
+    input                       i_clk;   // clock
+    input                       i_rst_n; // reset
+    input                       i_valid; //input valid signal
+    input [BIT_W - 1 : 0]      i_A;     // input operand A
+    input [BIT_W - 1 : 0]      i_B;     // input operand B
+    input [         2 : 0]      i_inst;  // instruction
 
-    output [2*BIT_W - 1 : 0]   o_data,  // output value
-    output                      o_done   // output valid signal
+    output [2*BIT_W - 1 : 0]   o_data;  // output value
+    output                      o_done;   // output valid signal
     
     parameter S_IDLE = 4'd0;
     parameter S_ADD  = 4'd1;
