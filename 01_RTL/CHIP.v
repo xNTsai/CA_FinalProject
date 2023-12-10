@@ -30,15 +30,18 @@ module CHIP #(
 // ------------------------------------------------------------------------------------------------------------------------------------------------------
 
     // TODO: any declaration
-    localparam ADD   = 7'b0110011;
+localparam ADD   = 7'b0110011;
     localparam SUB   = 7'b0110011;
     localparam XOR   = 7'b0110011;
     localparam MUL   = 7'b0110011;
     localparam AND   = 7'b0110011;
     // I-type
     localparam ADDI  = 7'b0010011;
-    localparam SLTI  = 7'b0010011;
+    localparam SLTI   = 7'b0010011;
     localparam LW    = 7'b0000011;
+    // Shift
+    localparam SLLI = 7'b0010011;
+    localparam SRAI = 7'b0010011;
     // B-type
     localparam BEQ   = 7'b1100011;
     localparam BGE =7'b1100011; 
@@ -53,6 +56,7 @@ module CHIP #(
     localparam AUIPC = 7'b0010111;
     // ECALL
     localparam ECALL = 7'b1110011;
+    
     //====== funct3 ======
     localparam ADD_FUNC3  = 3'b000;
     localparam SUB_FUNC3  = 3'b000;
@@ -65,6 +69,9 @@ module CHIP #(
     localparam BNE_FUNC3 = 3'b001;
     localparam BGE_FUNC3 = 3'b101;
     localparam BLT_FUNC3 = 3'b100;
+    localparam SLLI_FUNC3 = 3'b001;
+    localparam SRAI_FUNC3 = 3'b101;
+
 
     //====== funct7 ======
     localparam ADD_FUNC7 = 7'b0000000;
@@ -72,6 +79,8 @@ module CHIP #(
     localparam XOR_FUNC7 = 7'b0000000;
     localparam AND_FUNC7 = 7'b0000000;
     localparam MUL_FUNC7 = 7'b0000001;
+    localparam SLLI_FUNC7 = 7'b0000000; 
+    localparam SRAI_FUNC7  = 7'b0000000;
 
     // FSM state
     localparam S_IDLE        = 0;
@@ -221,6 +230,12 @@ module CHIP #(
                     SLTI_FUNC3: begin
                         if($signed(rs1_data) < $signed(imm_w[11:0])) rd_data = 32'd1;
                         else                                         rd_data = 32'd0;
+                    end
+                    SLLI_FUNC3: begin
+                        rd_data = rs1_data << imm_w[4:0];
+                    end
+                    SRAI_FUNC3: begin
+                        rd_data = $signed(rs1_data) >> imm_w[4:0];
                     end
                 endcase
             end
