@@ -79,14 +79,14 @@ localparam ADD   = 7'b0110011;
     localparam XOR_FUNC7 = 7'b0000000;
     localparam AND_FUNC7 = 7'b0000000;
     localparam MUL_FUNC7 = 7'b0000001;
-    localparam SLLI_FUNC7 = 7'b0000000; 
-    localparam SRAI_FUNC7  = 7'b0000000;
+    localparam SLLI_FUNC7 = 7'b0010011; 
+    localparam SRAI_FUNC7  = 7'b0010011;
 
     // FSM state
     localparam S_IDLE        = 0;
     localparam S_EXEC        = 1;
     localparam S_EXEC_MULDIV = 2;
-
+    localparam S_LW = 3;
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------
 // Wires and Registers
@@ -189,7 +189,7 @@ localparam ADD   = 7'b0110011;
         case (op_code_w)
             7'b0110011: begin
                 regWrite = 1'b1;
-                finish = 1'b0;
+                // finish = 1'b0;
                 case ({funct7_w, funct3_w})
                     {ADD_FUNC7, ADD_FUNC3}: begin
                         rd_data = $signed(rs1_data) + $signed(rs2_data);
@@ -214,14 +214,14 @@ localparam ADD   = 7'b0110011;
                             regWrite = 0;
                         end
                         mulDiv_vld_w = 1'b1;
-                        mulDiv_mode_w = 1'b0;
+                        mulDiv_mode_w = 3'b110;
                         rd_data = mulDiv_out_w[31:0];
                     end
                 endcase
             end
             7'b0010011: begin
                 regWrite = 1'b1;
-                finish = 1'b0;
+                // finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 case (funct3_w)
                     ADDI_FUNC3: begin
@@ -235,28 +235,36 @@ localparam ADD   = 7'b0110011;
                         rd_data = rs1_data << imm_w[4:0];
                     end
                     SRAI_FUNC3: begin
-                        rd_data = $signed(rs1_data) >> imm_w[4:0];
+                        rd_data = $signed(rs1_data) >>> imm_w[4:0];
                     end
                 endcase
             end
             7'b1100011:begin
                 imm_w[12:0] = {inst_w[31], inst_w[7], inst_w[30:25], inst_w[11:8], 1'b0};
-                finish = 1'b0;
+                // finish = 1'b0;
                 case (funct3_w)
                     BEQ_FUNC3: begin
-                        if(rs1_data == rs2_data) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
+                        // next_PC = PC;
+                        // if(!i_DMEM_stall) next_PC = PC + 3'd4;
+                        if($signed(rs1_data) == $signed(rs2_data)) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
                         else                     next_PC = PC + 3'd4;
                     end
                     BNE_FUNC3: begin
-                        if(rs1_data == rs2_data) next_PC = PC + 3'd4;
+                        // next_PC = PC;
+                        // if(!i_DMEM_stall) next_PC = PC + 3'd4;
+                        if($signed(rs1_data) == $signed(rs2_data)) next_PC = PC + 3'd4;
                         else                    next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
                     end
                     BGE_FUNC3: begin
-                        if(rs1_data >= rs2_data) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
+                        // next_PC = PC;
+                        //  if(!i_DMEM_stall) next_PC = PC + 3'd4;
+                        if($signed(rs1_data) >= $signed(rs2_data)) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
                         else                    next_PC = PC + 3'd4;
                     end
                     BLT_FUNC3: begin
-                        if(rs1_data < rs2_data) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
+                        // next_PC = PC;
+                        // if(!i_DMEM_stall) next_PC = PC + 3'd4;
+                        if($signed(rs1_data) < $signed(rs2_data)) next_PC = $signed({1'b0, PC}) + $signed(imm_w[12:0]);
                         else                    next_PC = PC + 3'd4;
                     end
 
@@ -272,7 +280,7 @@ localparam ADD   = 7'b0110011;
                 regWrite = 1'b1;
                 mem_cen_D_w = 1'b1;
                 mem_wen_D_w = 1'b0;
-                finish = 1'b0;
+                // finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 mem_addr_D_w = $signed({1'b0, rs1_data}) + $signed(imm_w[11:0]);
                 rd_data = i_DMEM_rdata;
@@ -282,7 +290,7 @@ localparam ADD   = 7'b0110011;
                 next_PC = PC;
                 if(!i_DMEM_stall) next_PC = PC + 3'd4;
 
-                finish = 1'b0;
+                // finish = 1'b0;
                 mem_cen_D_w = 1'b1;
                 mem_wen_D_w = 1'b1;
                 imm_w[4:0] = inst_w[11:7];
@@ -291,20 +299,20 @@ localparam ADD   = 7'b0110011;
                 mem_wdata_D_w = rs2_data;
             end
             AUIPC: begin
-                finish = 1'b0;
+                // finish = 1'b0;
                 regWrite = 1'b1;
                 imm_w[31:12] = inst_w[31:12];
                 rd_data = PC + imm_w;
             end
             JAL: begin
-                finish = 1'b0;
+                // finish = 1'b0;
                 imm_w[20:0] = {inst_w[31], inst_w[19:12], inst_w[20], inst_w[30:21], 1'b0};
                 next_PC = $signed({1'b0, PC}) + $signed(imm_w[20:0]);
                 regWrite = 1'b1;
                 rd_data = PC + 3'd4;
             end
             JALR: begin
-                finish = 1'b0;
+                // finish = 1'b0;
                 imm_w[11:0] = inst_w[31:20];
                 next_PC = $signed({1'b0, rs1_data}) + $signed(imm_w[11:0]);
                 regWrite = 1'b1;
@@ -320,9 +328,14 @@ localparam ADD   = 7'b0110011;
         state_w = state_r;
         case (state_r)
             S_IDLE: begin
+                // if(i_mem_stall) state_w = S_LW;
                 state_w = (op_code_w == 7'b0110011 && ({funct7_w, funct3_w} == {MUL_FUNC7, MUL_FUNC3})) ?
                         S_EXEC_MULDIV :
                         S_EXEC;
+                // if(op_code_w==7'b0000011 || op_code_w==7'b0100011){
+                //     state_w = S_LW;
+                // }
+                
             end
             S_EXEC: begin
                 state_w = (op_code_w == 7'b0110011 && ({funct7_w, funct3_w} == {MUL_FUNC7, MUL_FUNC3})) ?
@@ -332,6 +345,9 @@ localparam ADD   = 7'b0110011;
             S_EXEC_MULDIV: begin
                 state_w = (mulDiv_rdy_w) ? S_EXEC : S_EXEC_MULDIV;
             end 
+            S_LW: begin
+                state_w = (i_DMEM_stall) ? S_LW :S_EXEC;
+            end
         endcase
     end
     // sequential 
@@ -687,6 +703,7 @@ module Cache#(
 
     //------------------------------------------//
     //          default connection              //
+    
     assign o_mem_cen = i_proc_cen;              //
     assign o_mem_wen = i_proc_wen;              //
     assign o_mem_addr = i_proc_addr;            //
