@@ -713,5 +713,232 @@ module Cache#(
     //------------------------------------------//
 
     // Todo: BONUS
+    
+    //==== 2-way cache structure ==============================
+    /**
+        - 32 bit address : 25 tag, 3 index, 4 offset.
+        - 16 addresses access the same 128 bits data in memory.
+        - First four addresses access the first 32 bits in the 128 bits, and so on.
+        - Store 2*128 bits for data in a set.
+    **/
+
+    //==== state definition ===================================
+        parameter READY = 2'b00; 
+        parameter MISS  = 2'b01;
+        parameter WRITE  = 2'b10; 
+    //==== wire/reg definition ================================
+        wire [27:0]  proc_addr; 
+        reg          mem_cen,mem_wen,proc_stall;
+        reg          mem_write_w, mem_write_r;
+        reg  [31:0]  mem_addr_w, mem_addr_r;
+        reg  [31:0]  mem_wdata_w, mem_wdata_r;
+        reg  [1:0]   state_w, state_r;
+        reg  [152:0]  cache_w[0:3], cache_r[0:3];  // TODO: size not sure,  1 valid + 24 tag + 128 data ?
+        reg  [55:0]  tag_w[0:3], tag_r[0:3];
+        reg          lru_w[0:3], lru_r[0:3];
+        wire [2:0]   index; // 3 bits for index ( 2-way )
+        wire [255:0]  data; // 2*128 bits for data in a set ( 2 blocks )
+        wire [49:0]  tag;   // 24 bits for each tag ( 2 blocks )
+        wire         lru;
+        wire         hit1, hit0;
+        wire         hit;
+        integer i;
+
+    //==== combinational circuit ==============================
+        // 25 bits for tag, 3 bits for index, 4 bits for offset
+        assign proc_addr = i_proc_addr[31:4];   // tag bits + index bits
+        assign index = proc_addr[2:0];  // address[7:4] for index
+        assign {tag, data, lru} = {tag_r[index], cache_r[index], lru_r[index]};
+        assign hit1 = (tag[49:25] == proc_addr[27:3]);  // tag bits for subset 2
+        assign hit0 = (tag[24:0] == proc_addr[27:3]);   // tag bits for subset 1
+        assign hit = hit1 || hit0;
+        assign o_mem_addr = mem_addr_r;
+        assign o_mem_wdata = mem_wdata_r;
+        assign o_mem_cen = mem_cen;
+        assign o_mem_wen = mem_wen;
+        assign o_proc_stall = proc_stall;
+        assign o_proc_rdata = (hit1)? data[255:128]: data[127:0];  
+
+       always @(*) begin
+            case(state_r)
+                READY: begin
+                    if(i_proc_cen) begin
+                        if(hit) begin
+                            if(!i_proc_wen) begin   // active high for write
+                                // read hit
+                                proc_stall = 1'b0;
+                                state_w = state_r;
+                                mem_cen = 1'b0;
+                                mem_wen = 1'b0;
+                                mem_addr_w = mem_addr_r;
+                                mem_wdata_w = mem_wdata_r;
+                            end
+                            else begin
+                                // write hit
+                                proc_stall = 1'b1;
+                                state_w = WRITE;
+                                mem_cen = 1'b1;
+                                mem_wen = 1'b1;
+                                mem_addr_w = i_proc_addr;
+                                mem_wdata_w = i_proc_wdata;
+                            end
+                        end
+                        else begin
+                            // miss
+                            proc_stall = 1'b1;
+                            state_w = MISS;
+                            mem_cen = 1'b1;
+                            mem_wen = 1'b0;
+                            mem_addr_w = i_proc_addr;
+                            mem_wdata_w = lru ? data[63:32] : data[31:0];
+                        end
+                    end
+                    else begin
+                        proc_stall = 1'b0;
+                        state_w = state_r;
+                        mem_cen = 1'b0;
+                        mem_wen = 1'b0;
+                        mem_addr_w = mem_addr_r;
+                        mem_wdata_w = mem_wdata_r;
+
+                    end
+                end
+                MISS: begin
+                    // read
+                    if(~i_mem_stall) begin
+                        if(!i_proc_wen) begin
+                            // read miss
+                            proc_stall = 1'b1;
+                            state_w = READY;
+                            mem_cen = 1'b0;
+                            mem_wen = 1'b0;
+                            mem_addr_w = i_proc_addr;
+                            mem_wdata_w = lru ? data[63:32] : data[31:0];
+                        end
+                        else begin
+                            // write miss
+                            proc_stall = 1'b1;
+                            state_w = WRITE;
+                            mem_cen = 1'b1;
+                            mem_wen = 1'b1;
+                            mem_addr_w = i_proc_addr;
+                            mem_wdata_w = i_proc_wdata;
+                        end
+                    end
+                    else begin
+                        proc_stall = 1'b1;
+                        state_w = MISS;
+                        mem_cen = 1'b1;
+                        mem_wen = 1'b0;
+                        mem_addr_w = mem_addr_r;
+                        mem_wdata_w = lru ? data[63:32] : data[31:0];
+                    end
+                end
+                WRITE: begin
+                    if(~i_mem_stall) begin
+                            proc_stall = 1'b1;
+                            state_w = READY;
+                            mem_cen = 1'b0;
+                            mem_wen = 1'b0;
+                            mem_addr_w = i_proc_addr;
+                            mem_wdata_w = lru ? data[63:32] : data[31:0];
+                        end
+                    else begin
+                            proc_stall = 1'b1;
+                            state_w = WRITE;
+                            mem_cen = 1'b1;
+                            mem_wen = 1'b1;
+                            mem_addr_w = mem_addr_r;
+                            mem_wdata_w = mem_wdata_r;
+                        end
+                    end
+                default: begin
+                    proc_stall = 1'b1;
+                    state_w = READY;
+                    mem_cen = 1'b0;
+                    mem_wen = 1'b1;
+                    mem_addr_w = mem_addr_r;
+                    mem_wdata_w = mem_wdata_r;
+                end
+            endcase
+        end
+
+    always @(*) begin
+        for(i=0;i<4;i=i+1) begin
+            cache_w[i] = cache_r[i];
+            tag_w[i] = tag_r[i];
+            lru_w[i] = lru_r[i];
+        end
+        case(state_r)
+            READY: begin
+                if(hit1) begin
+                    tag_w[index] = tag_r[index];
+                    lru_w[index] = 1'b0;
+                    if(i_proc_wen) cache_w[index][63:32] = i_proc_wdata;
+                    else cache_w[index][63:32] = cache_r[index][63:32];
+                end
+                else if(hit0) begin
+                    tag_w[index] = tag_r[index];
+                    lru_w[index] = 1'b1;
+                    if(i_proc_wen) cache_w[index][31:0] = i_proc_wdata;
+                    else cache_w[index][31:0] = cache_r[index][31:0];
+                end
+            end
+            MISS: begin
+                if(~i_mem_stall) begin
+                    if(lru) begin
+                        lru_w[index] = lru_r[index];
+                        cache_w[index][63:32] = i_mem_rdata;
+                        tag_w[index][55:28] = proc_addr[29:2];
+                    end
+                    else begin
+                        lru_w[index] = lru_r[index];
+                        cache_w[index][31:0] = i_mem_rdata;
+                        tag_w[index][27:0] = proc_addr[29:2];
+                    end
+                end
+            end
+            WRITE: begin
+                if(~i_mem_stall) begin
+                    if(lru) begin
+                        lru_w[index] = lru_r[index];
+                        cache_w[index][63:32] = i_proc_wdata;
+                        tag_w[index][55:28] = proc_addr[29:2];
+                    end
+                    else begin
+                        lru_w[index] = lru_r[index];
+                        cache_w[index][31:0] = i_proc_wdata;
+                        tag_w[index][27:0] = proc_addr[29:2];
+                    end
+                end
+            end
+        endcase
+    end
+    
+    //==== sequential circuit =================================
+    always@( posedge i_clk ) begin
+        if( !i_rst_n ) begin
+            state_r <= READY;
+            mem_write_r <= 1'b0;
+            mem_addr_r <= 32'b0;
+            mem_wdata_r <= 32'b0;
+            for(i=0;i<4;i=i+1) begin
+                cache_r[i] <= 64'b0;
+                tag_r[i] <= 56'hff_ffff_ffff_ffff;
+                lru_r[i] <= 1'b0;
+            end
+        end
+        else begin
+            state_r <= state_w;
+            mem_write_r <= mem_write_w;
+            mem_addr_r <= mem_addr_w;
+            mem_wdata_r <= mem_wdata_w;
+            for(i=0;i<4;i=i+1) begin
+                cache_r[i] <= cache_w[i];
+                tag_r[i] <= tag_w[i];
+                lru_r[i] <= lru_w[i];
+            end
+        end
+    end
 
 endmodule
