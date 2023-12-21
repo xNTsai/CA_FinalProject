@@ -416,13 +416,13 @@ module MULDIV_unit#(
     // TODO: port declaration
     input                       i_clk;   // clock
     input                       i_rst_n; // reset
-    input                       i_valid; //input valid signal
+    input                       i_valid; //input lru signal
     input [BIT_W - 1 : 0]      i_A;     // input operand A
     input [BIT_W - 1 : 0]      i_B;     // input operand B
     input [         2 : 0]      i_inst;  // instruction
 
     output [2*BIT_W - 1 : 0]   o_data;  // output value
-    output                      o_done;   // output valid signal
+    output                      o_done;   // output lru signal
     
     parameter S_IDLE = 4'd0;
     parameter S_ADD  = 4'd1;
@@ -654,7 +654,7 @@ module MULDIV_unit#(
         endcase
     end
     
-    // Todo: output valid signal
+    // Todo: output lru signal
     assign o_data = data;
     assign o_done = done;
     // Todo: Sequential always block
@@ -704,12 +704,12 @@ module Cache#(
     //------------------------------------------//
     //          default connection              //
     
-    assign o_mem_cen = i_proc_cen;              //
-    assign o_mem_wen = i_proc_wen;              //
-    assign o_mem_addr = i_proc_addr;            //
-    assign o_mem_wdata = i_proc_wdata;          //
-    assign o_proc_rdata = i_mem_rdata[0+:BIT_W];//
-    assign o_proc_stall = i_mem_stall;          //
+    // assign o_mem_cen = i_proc_cen;              //
+    // assign o_mem_wen = i_proc_wen;              //
+    // assign o_mem_addr = i_proc_addr;            //
+    // assign o_mem_wdata = i_proc_wdata;          //
+    // assign o_proc_rdata = i_mem_rdata[0+:BIT_W];//
+    // assign o_proc_stall = i_mem_stall;          //
     //------------------------------------------//
 
     // Todo: BONUS
@@ -736,19 +736,24 @@ module Cache#(
         reg  [255:0] CacheData_w[0:7], CacheData_r[0:7];  // Data in a set(cache)
         reg  [49:0]  tag_w[0:7], tag_r[0:7];
         reg          lru_w[0:7], valid_r[0:7];
+        reg  [31:0]  data2CPU   // 32 bits data from cache -> CPU
         wire [2:0]   index; // 3 bits for index ( 2-way )
         wire [255:0]  data; // 2*128 bits for data in a set ( 2 blocks )
         wire [49:0]  tag;   // 24 bits for each tag ( 2 blocks )
-        wire         valid;
+        wire [3:0]   offset;
+        wire [127:0] datablock2CPU; // the block data that the 32 bits belong to
+        wire [127:0] datawrite2memory; // extend the wdata 32->128 bits to write to memory 
+        wire         lru;
         wire         hit1, hit0;
         wire         hit;
         integer i;
 
     //==== combinational circuit ==============================
         // 25 bits for tag, 3 bits for index, 4 bits for offset
+        assign offset = i_proc_addr[3:0];
         assign proc_addr = i_proc_addr[31:4];   // tag bits + index bits
         assign index = proc_addr[2:0];  // address[7:4] for index
-        assign {tag, data, valid} = {tag_r[index], CacheData_r[index], valid_r[index]};
+        assign {tag, data, lru} = {tag_r[index], CacheData_r[index], valid_r[index]};
         assign hit1 = (tag[49:25] == proc_addr[27:3]);  // tag bits for subset 2
         assign hit0 = (tag[24:0] == proc_addr[27:3]);   // tag bits for subset 1
         assign hit = hit1 || hit0;
@@ -757,9 +762,30 @@ module Cache#(
         assign o_mem_cen = mem_cen;
         assign o_mem_wen = mem_wen;
         assign o_proc_stall = proc_stall;
-        assign o_proc_rdata = (hit1)? data[255:128]: data[127:0];  
+        // ============= jerry version ==============
+        // assign o_proc_rdata = (hit1)? data[255:128]: data[127:0];  
+        // ========= xN version for offset ==========
+        assign o_proc_rdata = data2CPU;
+        assign blockdata2CPU = (hit1)? data[255:128]: data[127:0]; 
+        always @(*) begin
+            case(offset[3:2])
+                00: begin
+                  data2CPU = blockdata2CPU[127:96];
+                end
+                01: begin
+                  data2CPU = blockdata2CPU[95:64];
+                end
+                10: begin
+                  data2CPU = blockdata2CPU[63:32];
+                end
+                11: begin
+                  data2CPU = blockdata2CPU[31:0];
+                end
 
-       always @(*) begin
+        end
+        // ==========================================
+
+        always @(*) begin
             case(state_r)
                 READY: begin
                     if(i_proc_cen) begin
@@ -790,7 +816,7 @@ module Cache#(
                             mem_cen = 1'b1;
                             mem_wen = 1'b0;
                             mem_addr_w = i_proc_addr;
-                            mem_wdata_w = valid ? data[63:32] : data[31:0];
+                            mem_wdata_w = lru ? data[255:128] : data[127:0];
                         end
                     end
                     else begin
@@ -813,7 +839,7 @@ module Cache#(
                             mem_cen = 1'b0;
                             mem_wen = 1'b0;
                             mem_addr_w = i_proc_addr;
-                            mem_wdata_w = valid ? data[255:128]: data[127:0];
+                            mem_wdata_w = lru ? data[255:128]: data[127:0];
                         end
                         else begin
                             // write miss
@@ -831,7 +857,7 @@ module Cache#(
                         mem_cen = 1'b1;
                         mem_wen = 1'b0;
                         mem_addr_w = mem_addr_r;
-                        mem_wdata_w = valid ? data[255:128]: data[127:0];
+                        mem_wdata_w = lru ? data[255:128]: data[127:0];
                     end
                 end
                 WRITE: begin
@@ -841,7 +867,7 @@ module Cache#(
                             mem_cen = 1'b0;
                             mem_wen = 1'b0;
                             mem_addr_w = i_proc_addr;
-                            mem_wdata_w = valid ? data[255:128]: data[127:0];
+                            mem_wdata_w = lru ? data[255:128]: data[127:0];
                         end
                     else begin
                             proc_stall = 1'b1;
@@ -886,7 +912,7 @@ module Cache#(
             end
             MISS: begin
                 if(~i_mem_stall) begin
-                    if(valid) begin
+                    if(lru) begin
                         lru_w[index] = valid_r[index];
                         CacheData_w[index][255:128] = i_mem_rdata;
                         tag_w[index][49:25] = proc_addr[27:3];
@@ -900,7 +926,7 @@ module Cache#(
             end
             WRITE: begin
                 if(~i_mem_stall) begin
-                    if(valid) begin
+                    if(lru) begin
                         lru_w[index] = valid_r[index];
                         CacheData_w[index][255:128] = i_proc_wdata;
                         tag_w[index][49:25] = proc_addr[27:3];
@@ -921,7 +947,7 @@ module Cache#(
             state_r <= READY;
             mem_write_r <= 1'b0;
             mem_addr_r <= 32'b0;
-            mem_wdata_r <= 32'b0;
+            mem_wdata_r <= 128'b0;
             for(i=0;i<8;i=i+1) begin
                 CacheData_r[i] <= 256'b0;
                 tag_r[i] <= 50'hff_ffff_ffff_ffff;
